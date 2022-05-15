@@ -6,4 +6,6 @@ Author: Aljaž Šmaljcelj
 
 ## How to run
 
-**TODO**
+To run this project, simply open this project in Unity.
+Than let the program to load libraries and other required resources.
+When the process is finished, you can simply run `mainScene` and you can see the results.

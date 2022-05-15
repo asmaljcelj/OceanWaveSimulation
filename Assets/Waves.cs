@@ -13,10 +13,13 @@ public class Waves : MonoBehaviour
     public float Lx = 1.0f;
     public float Lz = 1.0f;
     public float windSpeed = 1.0f;
+    public Vector2 w;
     private float g = 9.81f;
     protected MeshFilter meshFilter;
     protected Mesh mesh;
     Complex[] spec2;
+
+    private long time = 0;
 
     // Start is called before the first frame update
     void Start()
@@ -43,24 +46,21 @@ public class Waves : MonoBehaviour
                 float kx = 2 * Mathf.PI * n / Lx;
                 float kz = 2 * Mathf.PI * m / Lz;
                 Vector2 k = new Vector2(kx, kz);
-                Complex y = calculateHeight(k);
-                //Debug.Log(y);
-                spec2[(index(n, m))] = y;
-                //verts[index(n, m)] = new Vector3(n, y, m);
-            }
-        }
-        Complex[] result = FFT.CalculateFFT(spec2, false);
-        for (int n = 0; n <= N; n++) {
-            for (int m = 0; m <= M; m++) {
-                int i = index(n, m);
-                Debug.Log(result[i].real);
-                verts[i] = new Vector3(n, (float) result[i].real, m);
+                Complex y = getFourierAmplitudesAtTime(k);
+                Vector2 position = new Vector2(x, z);
+                float dot = Vector2.Dot(k, position);
+                float real = Mathf.Cos(dot);
+                float im = Mathf.Sin(dot);
+                Complex exp = new Complex(real, im);
+                Complex result = y * exp;
+                float value = result.fMagnitude;
+                verts[index(n, m)] = new Vector3(n, value, m);
             }
         }
         return verts;
     }
 
-    public Complex calculateHeight(Vector2 k) {
+    public Complex calculateFourierAmplitudes(Vector2 k) {
         float gaussian1 = generateGaussianNum(0, 1);
         float gaussian2 = generateGaussianNum(0, 1);
         float result = 1.0f / Mathf.Sqrt(2.0f);
@@ -81,9 +81,28 @@ public class Waves : MonoBehaviour
         kL = Mathf.Pow(kL, 2);
         
         float a = Mathf.Exp(-1.0f / kL);
-        a = a / Mathf.Pow(kL, 4);
+        a = a / Mathf.Pow(k.magnitude, 4);
         a = a * numericConstant;
+        Vector2 cosineFactor = Vector2.Scale(k.normalized, w.normalized);
+        float value = Mathf.Pow(cosineFactor.magnitude, 2);
+        a = a * value;
+
         return a;
+    }
+
+    public Complex getFourierAmplitudesAtTime(Vector2 k) {
+        Complex h0 = calculateFourierAmplitudes(k);
+        Vector2 kNeg = new Vector2(-k.x, -k.y);
+        Complex h0Neg = calculateFourierAmplitudes(kNeg);
+        float wk = Mathf.Sqrt(g * k.magnitude);
+        float real1 = Mathf.Cos(wk * time);
+        float im1 = Mathf.Sin(wk * time);
+        Complex iwkt = new Complex(real1, im1);
+        float real2 = Mathf.Cos(-wk * time);
+        float im2 = Mathf.Sin(-wk * time);
+        Complex iwktMinus = new Complex(real2, im2);
+        Complex result = h0 * iwkt + h0Neg * iwktMinus;
+        return result;
     }
 
     public int index(int x, int z) {
@@ -119,7 +138,12 @@ public class Waves : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        
+        time = time + 1;
+        if (time % 500 == 0) {
+            mesh.vertices = GenerateVerts();
+            mesh.triangles = GenerateTries();
+            mesh.RecalculateBounds();
+        }
     }
 }
 
@@ -297,118 +321,4 @@ public struct Complex
                 return new Complex(a.x, a.y);
             }
     #endif
-}
-
-public class FFT
-{
-    // aSamples.Length need to be a power of two
-    public static Complex[] CalculateFFT(Complex[] aSamples, bool aReverse)
-    {
-        int power = (int)Math.Log(aSamples.Length, 2);
-        int count = 1;
-        for (int i = 0; i < power; i++)
-            count <<= 1;
-        int mid = count >> 1; // mid = count / 2;
-        int j = 0;
-        for (int i = 0; i < count - 1; i++)
-        {
-            if (i < j)
-            {
-                var tmp = aSamples[i];
-                aSamples[i] = aSamples[j];
-                aSamples[j] = tmp;
-            }
-            int k = mid;
-            while (k <= j)
-            {
-                j -= k;
-                k >>= 1;
-            }
-            j += k;
-        }
-        Complex r = new Complex(-1, 0);
-        int l2 = 1;
-        for (int l = 0; l < power; l++)
-        {
-            int l1 = l2;
-            l2 <<= 1;
-            Complex r2 = new Complex(1, 0);
-            for (int n = 0; n < l1; n++)
-            {
-                for (int i = n; i < count; i += l2)
-                {
-                    int i1 = i + l1;
-                    Complex tmp = r2 * aSamples[i1];
-                    aSamples[i1] = aSamples[i] - tmp;
-                    aSamples[i] += tmp;
-                }
-                r2 = r2 * r;
-            }
-            r.img = Math.Sqrt((1d - r.real) / 2d);
-            if (!aReverse)
-                r.img = -r.img;
-            r.real = Math.Sqrt((1d + r.real) / 2d);
-        }
-        if (!aReverse)
-        {
-            double scale = 1d / count;
-            for (int i = 0; i < count; i++)
-                aSamples[i] *= scale;
-        }
-        return aSamples;
-    }
-    #region float / double array conversion helpers
-    public static Complex[] Double2Complex(double[] aData)
-    {
-        Complex[] data = new Complex[aData.Length];
-        for (int i = 0; i < data.Length; i++)
-        {
-            data[i] = new Complex(aData[i], 0);
-        }
-        return data;
-    }
-    public static double[] Complex2Double(Complex[] aData, bool aReverse)
-    {
-        double[] result = new double[aData.Length];
-        if (!aReverse)
-        {
-            for (int i = 0; i < aData.Length; i++)
-            {
-                result[i] = aData[i].magnitude;
-            }
-            return result;
-        }
-        for (int i = 0; i < aData.Length; i++)
-        {
-            result[i] = Math.Sign(aData[i].real) * aData[i].magnitude;
-        }
-        return result;
-    }
-    public static Complex[] Float2Complex(float[] aData)
-    {
-        Complex[] data = new Complex[aData.Length];
-        for (int i = 0; i < data.Length; i++)
-        {
-            data[i] = new Complex(aData[i], 0);
-        }
-        return data;
-    }
-    public static float[] Complex2Float(Complex[] aData, bool aReverse)
-    {
-        float[] result = new float[aData.Length];
-        if (!aReverse)
-        {
-            for (int i = 0; i < aData.Length; i++)
-            {
-                result[i] = (float)aData[i].magnitude;
-            }
-            return result;
-        }
-        for (int i = 0; i < aData.Length; i++)
-        {
-            result[i] = (float)(Math.Sign(aData[i].real) * aData[i].magnitude);
-        }
-        return result;
-    }
-    #endregion float / double array conversion helpers
 }
